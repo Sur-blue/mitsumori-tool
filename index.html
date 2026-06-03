@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>床面積マップ エディタ — mitsumori-floor</title>
+<style>
+  :root { --blue:#4285f4; --bluebg:#e8f0fe; --gray:#bbb; --graybg:#f0f0f0; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif; color:#222; }
+  #top { display:flex; gap:8px; align-items:center; padding:8px 12px; background:#fafafa; border-bottom:1px solid #ddd; flex-wrap:wrap; }
+  #top button, #top label.btn { font-size:13px; padding:6px 10px; border:1px solid #ccc; background:#fff; border-radius:6px; cursor:pointer; }
+  #top button.active { background:var(--blue); color:#fff; border-color:var(--blue); }
+  #top button:hover { background:#f0f0f0; }
+  #top button.active:hover { background:#3b78e7; }
+  .sep { width:1px; height:24px; background:#ddd; margin:0 4px; }
+  #main { display:flex; height:calc(100vh - 49px); }
+  #canvasWrap { flex:1; position:relative; overflow:hidden; background:#e9e9e9; }
+  canvas { position:absolute; top:0; left:0; touch-action:none; }
+  @media (max-width:760px){
+    #main { flex-direction:column; height:calc(100vh - 49px); }
+    #canvasWrap { flex:none; height:52vh; }
+    #side { width:100%; flex:1; border-left:none; border-top:1px solid #ddd; }
+    #top button, #top label.btn { padding:8px 10px; }
+  }
+  #side { width:300px; border-left:1px solid #ddd; overflow-y:auto; padding:10px; background:#fff; }
+  #side h3 { font-size:14px; margin:8px 0 4px; }
+  .room-item { border:1px solid #e0e0e0; border-radius:6px; padding:8px; margin-bottom:8px; }
+  .room-item.selected { border-color:var(--blue); box-shadow:0 0 0 2px var(--bluebg); }
+  .room-item input[type=text] { width:100%; font-size:13px; padding:4px; margin-bottom:4px; }
+  .room-item .row { display:flex; gap:6px; align-items:center; font-size:12px; margin-bottom:3px; }
+  .room-item .area { font-weight:bold; color:#555; }
+  .room-item .area.measured { color:#1a8a4a; }
+  .room-item .ov { width:70px; font-size:12px; padding:2px 4px; }
+  .room-item .dim { width:62px; font-size:12px; padding:2px 4px; color:#555; }
+  .room-item .dim.measured { color:#1a8a4a; font-weight:bold; border-color:#1a8a4a; }
+  .colorkey { font-size:12px; color:#666; margin-top:4px; }
+  .colorkey b.m { color:#1a8a4a; } .colorkey b.a { color:#555; }
+  #makeBox { border:1px solid #e0e0e0; border-radius:6px; padding:8px; margin-top:8px; background:#fbfbfb; }
+  #makeBox h3 { margin:0 0 6px; }
+  .makeRow { display:flex; gap:4px; align-items:center; font-size:13px; margin-bottom:6px; }
+  .makeRow input[type=text] { flex:1; padding:5px; font-size:13px; }
+  .makeRow input[type=number] { width:60px; padding:5px; font-size:13px; }
+  #mkAdd, #gAdd { padding:5px 12px; border:1px solid var(--blue); background:var(--blue); color:#fff; border-radius:6px; cursor:pointer; }
+  #tabs { display:flex; gap:4px; margin-bottom:8px; }
+  .tab { flex:1; padding:8px; font-size:13px; border:1px solid #ccc; background:#f3f3f3; border-radius:6px 6px 0 0; cursor:pointer; }
+  .tab.active { background:var(--blue); color:#fff; border-color:var(--blue); font-weight:bold; }
+  .glass-item { border:1px solid #e0e0e0; border-radius:6px; padding:8px; margin-bottom:8px; font-size:13px; }
+  .glass-item .band { display:inline-block; padding:1px 6px; border-radius:10px; font-size:11px; color:#fff; }
+  .band.b1 { background:#7e57c2; } .band.b2 { background:#4285f4; } .band.b3 { background:#e67e22; }
+  .glass-item input { font-size:12px; padding:2px 4px; }
+  .totals { background:var(--bluebg); border-radius:6px; padding:10px; font-size:14px; line-height:1.6; }
+  .hint { font-size:12px; color:#666; line-height:1.5; }
+  #status { font-size:12px; color:#888; margin-left:auto; }
+  .danger { color:#c0392b; cursor:pointer; }
+  .scaleInfo { font-size:12px; color:#444; }
+</style>
+</head>
+<body>
+<div id="top">
+  <label class="btn">画像を開く<input id="imgFile" type="file" accept="image/*" hidden></label>
+  <label class="btn">下書きJSON<input id="draftFile" type="file" accept=".json,application/json" hidden></label>
+  <span class="sep"></span>
+  <button id="modeSelect" class="active">選択/移動</button>
+  <button id="modeAdd">部屋を追加</button>
+  <button id="modeScale">縮尺合わせ</button>
+  <span class="sep"></span>
+  <button id="exportPng">PNG出力</button>
+  <button id="exportCsv">表(CSV)</button>
+  <label class="btn">プロジェクトを開く<input id="projFile" type="file" accept=".json,application/json" hidden></label>
+  <button id="saveProj">プロジェクト保存(画像ごと)</button>
+  <button id="clearBtn">新規/クリア</button>
+  <span id="savedTag" style="font-size:12px;color:#1a8a4a;margin-left:6px;"></span>
+  <span id="status">画像を開いてください</span>
+</div>
+<div id="main">
+  <div id="canvasWrap">
+    <canvas id="cv"></canvas>
+  </div>
+  <div id="side">
+    <div id="tabs">
+      <button id="tabFloor" class="tab active">床面積マップ</button>
+      <button id="tabGlass" class="tab">ガラス枚数</button>
+    </div>
+    <div id="floorView">
+    <div class="scaleInfo" id="scaleInfo">縮尺: 未設定</div>
+    <div class="totals" id="totals">対象合計: — m²</div>
+    <div class="colorkey"><b class="a">■灰=自動計算</b> ／ <b class="m">■緑=実測（手入力）◆</b></div>
+    <div id="makeBox">
+      <h3 style="margin-top:10px;">部屋を作る（実測・図面なしOK）</h3>
+      <div class="makeRow"><input id="mkName" type="text" placeholder="部屋名（例 廊下）"></div>
+      <div class="makeRow">横<input id="mkW" type="number" step="0.1" placeholder="m"> ×縦<input id="mkH" type="number" step="0.1" placeholder="m">
+        <button id="mkAdd">追加</button></div>
+      <div class="hint">長方形ブロックを作って、マップ上でドラッグして配置。図面写真がなくても、実測しながらマップを組み立てられます。</div>
+    </div>
+    <h3>部屋一覧</h3>
+    <div id="roomList"></div>
+    <h3>使い方</h3>
+    <div class="hint" id="hint">
+      1. <b>画像を開く</b>で図面写真を読み込み<br>
+      2. <b>下書きJSON</b>があれば読み込む（Claudeが生成）<br>
+      3. <b>縮尺合わせ</b>: 図面の既知寸法線を2点クリック→実寸(mm)を入力<br>
+      4. <b>選択/移動</b>: 頂点をドラッグで微調整。部屋内をドラッグで移動<br>
+      5. <b>部屋を追加</b>: クリックで頂点を置く→ダブルクリック/Enterで閉じる<br>
+      6. 部屋名・対象/対象外・面積の手入力上書きは右の一覧で<br>
+      7. <b>PNG出力</b>でマップ画像、<b>表(CSV)</b>で面積一覧<br>
+      ・PC: ホイールでズーム、Spaceを押しながらドラッグで移動<br>
+      ・スマホ/タブレット: 2本指でピンチズーム＆移動、頂点を指でドラッグ。追加モードはタップで頂点、ダブルタップで閉じる<br>
+      ・作業は<b>自動でブラウザに保存</b>され、次に開くと続きから復元（再アップロード不要）。
+      新しい図面を始めるときは<b>新規/クリア</b><br>
+      ・<b>別端末で続ける</b>: 「プロジェクト保存(画像ごと)」でファイル化→iCloud等に置く→別端末で「プロジェクトを開く」
+    </div>
+    </div><!-- /floorView -->
+
+    <div id="glassView" hidden>
+      <h3 style="margin-top:6px;">ガラスを追加</h3>
+      <div class="makeRow"><input id="gLoc" type="text" placeholder="場所（任意・例 南面掃き出し）"></div>
+      <div class="makeRow">横<input id="gW" type="number" step="0.1" placeholder="m"> ×縦<input id="gH" type="number" step="0.1" placeholder="m">
+        枚数<input id="gQ" type="number" step="1" min="1" placeholder="1" style="width:48px;"> <button id="gAdd">追加</button></div>
+      <div class="hint">ガラス1枚の横×縦(m)と枚数を入力。面積帯（窓ガラス料金区分）ごとに枚数を集計します。</div>
+
+      <div class="totals" id="glassSummary" style="margin-top:10px;">まだ登録がありません</div>
+
+      <h3>ガラス一覧</h3>
+      <div id="glassList"></div>
+
+      <div style="margin-top:10px;"><button id="glassCsv">ガラス一覧(CSV)</button></div>
+      <div class="hint" style="margin-top:8px;">面積帯の区分：1m²未満／1〜2m²未満／2m²以上。これは窓ガラスクリーニングの料金区分に対応します（金額はこのアプリでは出しません）。</div>
+    </div><!-- /glassView -->
+  </div>
+</div>
+<script>
+"use strict";
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const wrap = document.getElementById('canvasWrap');
+
+let img = null, imgW = 0, imgH = 0;
+let view = { scale: 1, ox: 0, oy: 0 }; // canvas transform: screen = world*scale + o
+let mode = 'select';
+let rooms = []; // {id,name,target,points:[{x,y}](image px),areaOverride}
+let selected = null;
+let drag = null; // {type:'vertex'|'room'|'pan', ...}
+let addPts = [];
+let calib = null; // {p1,p2,meters} image px; pxPerMeter derived
+let pxPerMeter = null;
+let hoverV = null;
+let nextId = 1;
+let glass = []; // {id, loc, w, h, qty, x?, y?}  x,y=マップ上の配置（world px、未配置なら無し）
+let placingGlass = null; // 配置待ちのガラス
+
+function resize(){ cv.width = wrap.clientWidth; cv.height = wrap.clientHeight; draw(); }
+window.addEventListener('resize', resize);
+
+function fitView(){
+  if(!img) return;
+  const m = 30;
+  const s = Math.min((cv.width-m*2)/imgW, (cv.height-m*2)/imgH);
+  view.scale = s;
+  view.ox = (cv.width - imgW*s)/2;
+  view.oy = (cv.height - imgH*s)/2;
+}
+function w2s(p){ return { x:p.x*view.scale+view.ox, y:p.y*view.scale+view.oy }; }
+function s2w(p){ return { x:(p.x-view.ox)/view.scale, y:(p.y-view.oy)/view.scale }; }
+
+// ---- area (shoelace) in image px^2 ----
+function polyAreaPx(pts){
+  let a=0; for(let i=0;i<pts.length;i++){ const j=(i+1)%pts.length; a += pts[i].x*pts[j].y - pts[j].x*pts[i].y; } return Math.abs(a)/2;
+}
+function bbox(pts){ let mnx=1e9,mny=1e9,mxx=-1e9,mxy=-1e9; pts.forEach(p=>{mnx=Math.min(mnx,p.x);mny=Math.min(mny,p.y);mxx=Math.max(mxx,p.x);mxy=Math.max(mxy,p.y);}); return {mnx,mny,mxx,mxy}; }
+function num(v){ return (v!=null && v!=='') ? parseFloat(v) : null; }
+// 縦横サイズ（m）: 実測値(wMan/hMan)があればそれ、なければ多角形の外接矩形×縮尺から自動
+function roomDimsM(r){
+  let wAuto=null,hAuto=null;
+  if(pxPerMeter && r.points.length>=2){ const b=bbox(r.points); wAuto=(b.mxx-b.mnx)/pxPerMeter; hAuto=(b.mxy-b.mny)/pxPerMeter; }
+  const wMan=num(r.wMan), hMan=num(r.hMan);
+  return { w: wMan??wAuto, h: hMan??hAuto, wAuto, hAuto, wMeasured: wMan!=null, hMeasured: hMan!=null };
+}
+function roomAreaM2(r){
+  if(r.areaOverride!=null && r.areaOverride!=='') return parseFloat(r.areaOverride);
+  const wMan=num(r.wMan), hMan=num(r.hMan);
+  if(wMan!=null && hMan!=null) return wMan*hMan; // 実測の縦横から
+  if(!pxPerMeter || r.points.length<3) return null;
+  return polyAreaPx(r.points)/(pxPerMeter*pxPerMeter);
+}
+// その部屋の数値が「実測（手入力）」由来か
+function isMeasured(r){ return (r.areaOverride!=null && r.areaOverride!=='') || (num(r.wMan)!=null && num(r.hMan)!=null); }
+function centroid(pts){
+  let x=0,y=0; pts.forEach(p=>{x+=p.x;y+=p.y;}); return {x:x/pts.length,y:y/pts.length};
+}
+
+// ---- draw ----
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.fillStyle='#e9e9e9'; ctx.fillRect(0,0,cv.width,cv.height);
+  if(img){ ctx.save(); ctx.translate(view.ox,view.oy); ctx.scale(view.scale,view.scale); ctx.drawImage(img,0,0); ctx.restore(); }
+  // rooms
+  rooms.forEach(r=>{
+    if(r.points.length<2) return;
+    ctx.beginPath();
+    r.points.forEach((p,i)=>{ const s=w2s(p); i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y); });
+    ctx.closePath();
+    ctx.fillStyle = r.target ? 'rgba(66,133,244,0.22)' : 'rgba(150,150,150,0.22)';
+    ctx.fill();
+    ctx.lineWidth = (r===selected)?3:2;
+    ctx.strokeStyle = r.target ? '#4285f4' : '#999';
+    ctx.stroke();
+    // label
+    const c = w2s(centroid(r.points));
+    const a = roomAreaM2(r);
+    const dm = roomDimsM(r);
+    const meas = isMeasured(r);
+    const MEAS_COL='#1a8a4a', AUTO_COL='#555'; // 実測=緑 / 自動=灰
+    ctx.textAlign='center';
+    ctx.fillStyle='#222'; ctx.font='bold 14px sans-serif';
+    ctx.fillText(r.name||'(無名)', c.x, c.y-12);
+    // 縦×横
+    if(dm.w!=null && dm.h!=null){
+      ctx.font='11px sans-serif'; ctx.fillStyle = (dm.wMeasured||dm.hMeasured)?MEAS_COL:AUTO_COL;
+      ctx.fillText(`${dm.w.toFixed(2)} × ${dm.h.toFixed(2)} m`, c.x, c.y+4);
+    }
+    // 面積
+    if(a!=null){ ctx.font='bold 13px sans-serif'; ctx.fillStyle = meas?MEAS_COL:AUTO_COL; ctx.fillText(a.toFixed(1)+' m²'+(meas?' ◆':''), c.x, c.y+20); }
+    // vertices when selected
+    if(r===selected){
+      const vr = touchMode ? 9 : 6;
+      r.points.forEach(p=>{ const s=w2s(p); ctx.beginPath(); ctx.arc(s.x,s.y,vr,0,7); ctx.fillStyle='#fff'; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle='#4285f4'; ctx.stroke(); });
+    }
+  });
+  // add-in-progress
+  if(mode==='add' && addPts.length){
+    ctx.beginPath();
+    addPts.forEach((p,i)=>{ const s=w2s(p); i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y); });
+    ctx.strokeStyle='#e67e22'; ctx.lineWidth=2; ctx.stroke();
+    addPts.forEach(p=>{ const s=w2s(p); ctx.beginPath(); ctx.arc(s.x,s.y,5,0,7); ctx.fillStyle='#e67e22'; ctx.fill(); });
+  }
+  // ガラスのマーカー
+  glass.forEach(g=>{
+    if(g.x==null||g.y==null) return;
+    const s=w2s({x:g.x,y:g.y});
+    const area=g.w*g.h; const bcol = area<1?'#7e57c2':area<2?'#4285f4':'#e67e22';
+    const label='🪟×'+g.qty;
+    ctx.font='bold 12px sans-serif'; const tw=ctx.measureText(label).width;
+    const pw=tw+14, ph=20;
+    ctx.fillStyle=bcol; ctx.strokeStyle='#fff'; ctx.lineWidth=2;
+    if(ctx.roundRect){ ctx.beginPath(); ctx.roundRect(s.x-pw/2, s.y-ph/2, pw, ph, 5); ctx.fill(); ctx.stroke(); }
+    else { ctx.fillRect(s.x-pw/2,s.y-ph/2,pw,ph); ctx.strokeRect(s.x-pw/2,s.y-ph/2,pw,ph); }
+    ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(label, s.x, s.y);
+    ctx.textBaseline='alphabetic';
+  });
+
+  // calibration line
+  if(calib){
+    const a=w2s(calib.p1), b=w2s(calib.p2);
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.strokeStyle='#27ae60'; ctx.lineWidth=3; ctx.stroke();
+    [a,b].forEach(s=>{ ctx.beginPath(); ctx.arc(s.x,s.y,5,0,7); ctx.fillStyle='#27ae60'; ctx.fill(); });
+  }
+  if(mode==='scale' && calibTmp && calibTmp.length===1){
+    const s=w2s(calibTmp[0]); ctx.beginPath(); ctx.arc(s.x,s.y,5,0,7); ctx.fillStyle='#27ae60'; ctx.fill();
+  }
+}
+
+// ---- hit testing ----
+function findVertex(sp){
+  if(!selected) return null;
+  const R = touchMode ? 20 : 9; // 指は太いのでタッチ時は当たり判定を大きく
+  for(let i=0;i<selected.points.length;i++){ const s=w2s(selected.points[i]); if(Math.hypot(s.x-sp.x,s.y-sp.y)<R) return i; }
+  return null;
+}
+function pointInPoly(wp,pts){
+  let inside=false; for(let i=0,j=pts.length-1;i<pts.length;j=i++){ const xi=pts[i].x,yi=pts[i].y,xj=pts[j].x,yj=pts[j].y; const inter=((yi>wp.y)!=(yj>wp.y))&&(wp.x<(xj-xi)*(wp.y-yi)/(yj-yi)+xi); if(inter) inside=!inside; } return inside;
+}
+function roomAt(wp){ for(let i=rooms.length-1;i>=0;i--){ if(rooms[i].points.length>=3 && pointInPoly(wp,rooms[i].points)) return rooms[i]; } return null; }
+function findGlassMarker(sp){
+  const R=touchMode?22:14;
+  for(let i=glass.length-1;i>=0;i--){ const g=glass[i]; if(g.x==null)continue; const s=w2s({x:g.x,y:g.y}); if(Math.abs(s.x-sp.x)<R+10 && Math.abs(s.y-sp.y)<R) return g; }
+  return null;
+}
+
+// ---- interaction ----
+let spaceDown=false, calibTmp=null;
+window.addEventListener('keydown',e=>{ if(e.code==='Space'){spaceDown=true;} if(e.key==='Enter'&&mode==='add'){closeAddRoom();} if(e.key==='Escape'){addPts=[];calibTmp=null;draw();} if((e.key==='Delete'||e.key==='Backspace')&&selected&&document.activeElement===document.body){deleteRoom(selected); e.preventDefault();} });
+window.addEventListener('keyup',e=>{ if(e.code==='Space')spaceDown=false; });
+
+function rectSP(cx,cy){ const r=cv.getBoundingClientRect(); return {x:cx-r.left, y:cy-r.top}; }
+function getSP(e){ return rectSP(e.clientX, e.clientY); }
+let touchMode=false; // タッチ操作中は当たり判定を大きく
+
+// 共通: 押下・移動・離す（マウスもタッチも同じロジックを呼ぶ）
+function onDown(sp, forcePan){
+  const wp=s2w(sp);
+  // ガラス配置待ち：クリック位置にマーカーを置く
+  if(placingGlass){ placingGlass.x=wp.x; placingGlass.y=wp.y; placingGlass=null; setTab('floor'); renderGlass(); refresh(); status('ガラスを配置しました'); return; }
+  if(forcePan){ drag={type:'pan',sx:sp.x,sy:sp.y,ox:view.ox,oy:view.oy}; return; }
+  // ガラスマーカーのドラッグ（部屋より優先）
+  if(mode==='select'){ const gm=findGlassMarker(sp); if(gm){ drag={type:'glass',g:gm}; return; } }
+  if(mode==='scale'){
+    if(!calibTmp) calibTmp=[];
+    calibTmp.push(wp);
+    if(calibTmp.length===2){
+      const dpx=Math.hypot(calibTmp[1].x-calibTmp[0].x, calibTmp[1].y-calibTmp[0].y);
+      const mm=prompt('この2点間の実際の寸法は？（mm単位で入力。例 7325）');
+      if(mm && parseFloat(mm)>0){ calib={p1:calibTmp[0],p2:calibTmp[1],meters:parseFloat(mm)/1000}; pxPerMeter=dpx/calib.meters; updateScaleInfo(); refresh(); }
+      calibTmp=null; setMode('select');
+    }
+    draw(); return;
+  }
+  if(mode==='add'){ addPts.push(wp); draw(); return; }
+  const vi=findVertex(sp);
+  if(vi!=null){ drag={type:'vertex',i:vi}; return; }
+  const r=roomAt(wp);
+  if(r){ selectRoom(r); drag={type:'room',last:wp}; }
+  else { selectRoom(null); drag={type:'pan',sx:sp.x,sy:sp.y,ox:view.ox,oy:view.oy}; }
+}
+function onMove(sp){
+  const wp=s2w(sp);
+  if(!drag) return;
+  if(drag.type==='pan'){ view.ox=drag.ox+(sp.x-drag.sx); view.oy=drag.oy+(sp.y-drag.sy); draw(); }
+  else if(drag.type==='vertex' && selected){ selected.points[drag.i]={x:wp.x,y:wp.y}; refresh(); }
+  else if(drag.type==='room' && selected){ const dx=wp.x-drag.last.x, dy=wp.y-drag.last.y; selected.points.forEach(p=>{p.x+=dx;p.y+=dy;}); drag.last=wp; refresh(); }
+  else if(drag.type==='glass'){ drag.g.x=wp.x; drag.g.y=wp.y; draw(); save(); }
+}
+function onUp(){ drag=null; }
+function zoomAt(sp, f){ const before=s2w(sp); view.scale*=f; const after=s2w(sp); view.ox+=(after.x-before.x)*view.scale; view.oy+=(after.y-before.y)*view.scale; draw(); }
+
+// --- マウス ---
+cv.addEventListener('mousedown',e=>{ touchMode=false; onDown(getSP(e), spaceDown||e.button===1); });
+cv.addEventListener('mousemove',e=>{ onMove(getSP(e)); });
+window.addEventListener('mouseup',onUp);
+cv.addEventListener('dblclick',e=>{ if(mode==='add') closeAddRoom(); });
+cv.addEventListener('wheel',e=>{ e.preventDefault(); zoomAt(getSP(e), e.deltaY<0?1.1:1/1.1); },{passive:false});
+
+// --- タッチ（スマホ・タブレット）---
+let pinch=null, lastTapT=0;
+cv.addEventListener('touchstart',e=>{
+  touchMode=true;
+  if(e.touches.length===2){
+    drag=null;
+    const a=rectSP(e.touches[0].clientX,e.touches[0].clientY), b=rectSP(e.touches[1].clientX,e.touches[1].clientY);
+    pinch={ d:Math.hypot(b.x-a.x,b.y-a.y), mid:{x:(a.x+b.x)/2,y:(a.y+b.y)/2}, ox:view.ox, oy:view.oy };
+  } else if(e.touches.length===1){
+    const sp=rectSP(e.touches[0].clientX,e.touches[0].clientY);
+    // ダブルタップで部屋を閉じる（追加モード時）
+    const now=Date.now();
+    if(mode==='add' && now-lastTapT<320){ closeAddRoom(); lastTapT=0; e.preventDefault(); return; }
+    lastTapT=now;
+    onDown(sp, false);
+  }
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener('touchmove',e=>{
+  if(e.touches.length===2 && pinch){
+    const a=rectSP(e.touches[0].clientX,e.touches[0].clientY), b=rectSP(e.touches[1].clientX,e.touches[1].clientY);
+    const d=Math.hypot(b.x-a.x,b.y-a.y), mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+    // パン（2本指の移動）＋ピンチズーム
+    view.ox=pinch.ox+(mid.x-pinch.mid.x); view.oy=pinch.oy+(mid.y-pinch.mid.y);
+    if(pinch.d>0){ zoomAt(mid, d/pinch.d); }
+    pinch.d=d; pinch.mid=mid; pinch.ox=view.ox; pinch.oy=view.oy;
+  } else if(e.touches.length===1){
+    onMove(rectSP(e.touches[0].clientX,e.touches[0].clientY));
+  }
+  e.preventDefault();
+},{passive:false});
+cv.addEventListener('touchend',e=>{ if(e.touches.length===0){ pinch=null; onUp(); } e.preventDefault(); },{passive:false});
+
+function closeAddRoom(){
+  if(addPts.length>=3){ const r={id:nextId++,name:'新しい部屋',target:true,points:addPts.map(p=>({x:p.x,y:p.y})),areaOverride:'',wMan:'',hMan:''}; rooms.push(r); selectRoom(r); }
+  addPts=[]; setMode('select'); refresh();
+}
+
+// 実測の長方形ブロックを作る（図面なしでもOK）
+const DISP_PXM=40; // 図面がないときの表示倍率（1m=40px）
+function addMeasuredRoom(name,w,h){
+  if(!(w>0&&h>0)){ alert('横と縦をメートルで入力してください'); return; }
+  if(!pxPerMeter){ pxPerMeter=DISP_PXM; updateScaleInfo(); }
+  const S=pxPerMeter;
+  // 現在の表示中央あたりに、少しずつずらして置く（重なり防止）
+  const c=s2w({x:cv.width/2, y:cv.height/2});
+  const k=rooms.length%6;
+  const ox=c.x - w*S/2 + k*14, oy=c.y - h*S/2 + k*14;
+  const wp=w*S, hp=h*S;
+  const r={ id:nextId++, name:name||'部屋', target:true, areaOverride:'',
+    wMan:String(w), hMan:String(h),
+    points:[{x:ox,y:oy},{x:ox+wp,y:oy},{x:ox+wp,y:oy+hp},{x:ox,y:oy+hp}] };
+  rooms.push(r); selectRoom(r); refresh();
+  status(`「${r.name}」を追加（${w}×${h}m）。ドラッグで配置してください`);
+}
+document.getElementById('mkAdd').onclick=()=>{
+  const name=document.getElementById('mkName').value.trim();
+  const w=parseFloat(document.getElementById('mkW').value), h=parseFloat(document.getElementById('mkH').value);
+  addMeasuredRoom(name,w,h);
+  document.getElementById('mkName').value=''; document.getElementById('mkW').value=''; document.getElementById('mkH').value='';
+  document.getElementById('mkName').focus();
+};
+document.getElementById('mkH').addEventListener('keydown',e=>{ if(e.key==='Enter') document.getElementById('mkAdd').click(); });
+
+// ---- modes ----
+function setMode(m){ mode=m; document.getElementById('modeSelect').classList.toggle('active',m==='select'); document.getElementById('modeAdd').classList.toggle('active',m==='add'); document.getElementById('modeScale').classList.toggle('active',m==='scale'); status(m==='add'?'タップ/クリックで頂点→ダブルタップ/ダブルクリック/Enterで閉じる':m==='scale'?'既知寸法の2点をタップ/クリック':''); if(m!=='add')addPts=[]; if(m!=='scale')calibTmp=null; draw(); }
+document.getElementById('modeSelect').onclick=()=>setMode('select');
+document.getElementById('modeAdd').onclick=()=>setMode('add');
+document.getElementById('modeScale').onclick=()=>setMode('scale');
+
+// ---- side panel ----
+function selectRoom(r){ selected=r; renderList(); draw(); }
+function deleteRoom(r){ rooms=rooms.filter(x=>x!==r); if(selected===r)selected=null; refresh(); }
+function renderList(){
+  const el=document.getElementById('roomList'); el.innerHTML='';
+  rooms.forEach(r=>{
+    const a=roomAreaM2(r);
+    const dm=roomDimsM(r);
+    const meas=isMeasured(r);
+    const d=document.createElement('div'); d.className='room-item'+(r===selected?' selected':'');
+    const wPh = dm.wAuto!=null?dm.wAuto.toFixed(2):'自動';
+    const hPh = dm.hAuto!=null?dm.hAuto.toFixed(2):'自動';
+    d.innerHTML=`<input type="text" value="${(r.name||'').replace(/"/g,'&quot;')}" data-f="name">
+      <div class="row"><label><input type="checkbox" ${r.target?'checked':''} data-f="target"> 清掃対象</label>
+      <span class="area ${meas?'measured':''}">${a!=null?a.toFixed(1)+' m²':'—'}</span></div>
+      <div class="row">横<input class="dim ${dm.wMeasured?'measured':''}" type="number" step="0.01" placeholder="${wPh}" value="${r.wMan??''}" data-f="w">
+      ×縦<input class="dim ${dm.hMeasured?'measured':''}" type="number" step="0.01" placeholder="${hPh}" value="${r.hMan??''}" data-f="h"> m</div>
+      <div class="row">面積上書き<input class="ov" type="number" step="0.1" placeholder="自動" value="${r.areaOverride??''}" data-f="ov"> m²
+      <span class="danger" data-f="del">削除</span></div>`;
+    d.querySelector('[data-f=name]').oninput=e=>{r.name=e.target.value;draw();};
+    d.querySelector('[data-f=target]').onchange=e=>{r.target=e.target.checked;refresh();};
+    d.querySelector('[data-f=w]').oninput=e=>{r.wMan=e.target.value;refresh();};
+    d.querySelector('[data-f=h]').oninput=e=>{r.hMan=e.target.value;refresh();};
+    d.querySelector('[data-f=ov]').oninput=e=>{r.areaOverride=e.target.value;refresh();};
+    d.querySelector('[data-f=del]').onclick=()=>deleteRoom(r);
+    d.onclick=e=>{ if(e.target.tagName!=='INPUT'&&!e.target.dataset.f) selectRoom(r); };
+    el.appendChild(d);
+  });
+}
+function updateTotals(){
+  let tgt=0,all=0,ok=true;
+  rooms.forEach(r=>{ const a=roomAreaM2(r); if(a==null){ok=false;return;} all+=a; if(r.target)tgt+=a; });
+  const n=rooms.filter(r=>r.target).length;
+  document.getElementById('totals').innerHTML = pxPerMeter||rooms.some(r=>r.areaOverride)
+    ? `清掃対象合計: <b>${tgt.toFixed(1)} m²</b>（${n}室）<br><span class="hint">参考・全体: ${all.toFixed(1)} m²</span>`+(ok?'':'<br><span class="hint">※未計算の部屋あり（縮尺未設定）</span>')
+    : '対象合計: — m²（縮尺を設定してください）';
+}
+function updateScaleInfo(){
+  const el=document.getElementById('scaleInfo');
+  if(!pxPerMeter){ el.textContent='縮尺: 未設定'; }
+  else if(calib){ el.textContent=`縮尺: 1m = ${pxPerMeter.toFixed(1)}px（基準 ${calib.meters*1000}mm）`; }
+  else { el.textContent=`実測モード: 1m = ${pxPerMeter.toFixed(0)}px 表示`; }
+}
+function refresh(){ renderList(); updateTotals(); draw(); save(); }
+function status(t){ document.getElementById('status').textContent=t||''; }
+
+// ---- データの直列化（画像あり=正規化座標 / 画像なし=絶対px）----
+function buildData(){
+  const noImg = !img;
+  const sc = calib && img ? {p1:{x:calib.p1.x/imgW,y:calib.p1.y/imgH},p2:{x:calib.p2.x/imgW,y:calib.p2.y/imgH},meters:calib.meters}
+                          : (pxPerMeter?{pxPerMeter}:null);
+  return { _type:'mitsumori-floor', noImg, imgDataURL: img?imgDataURL:null, imgW, imgH, scale:sc,
+    rooms: rooms.map(r=>({name:r.name,target:r.target,areaOverride:r.areaOverride||'',wMan:r.wMan||'',hMan:r.hMan||'',
+      points:r.points.map(p=> noImg ? {x:Math.round(p.x),y:Math.round(p.y)} : {x:+(p.x/imgW).toFixed(4),y:+(p.y/imgH).toFixed(4)}) })),
+    glass: glass.map(g=>{ const o={loc:g.loc,w:g.w,h:g.h,qty:g.qty};
+      if(g.x!=null&&g.y!=null){ if(noImg){o.x=Math.round(g.x);o.y=Math.round(g.y);} else {o.x=+(g.x/imgW).toFixed(4);o.y=+(g.y/imgH).toFixed(4);} }
+      return o; }) };
+}
+function applyData(d, done){
+  const finish=()=>{
+    calib=null; pxPerMeter=null;
+    if(d.scale){ if(d.scale.pxPerMeter){ pxPerMeter=d.scale.pxPerMeter; }
+      else if(d.scale.p1 && img){ const p1={x:d.scale.p1.x*imgW,y:d.scale.p1.y*imgH}, p2={x:d.scale.p2.x*imgW,y:d.scale.p2.y*imgH}; calib={p1,p2,meters:d.scale.meters}; pxPerMeter=Math.hypot(p2.x-p1.x,p2.y-p1.y)/d.scale.meters; } }
+    const noImg = d.noImg || !img;
+    rooms=(d.rooms||[]).map(r=>({id:nextId++,name:r.name,target:r.target!==false,areaOverride:r.areaOverride||'',wMan:r.wMan||'',hMan:r.hMan||'',
+      points:(r.points||[]).map(p=> noImg ? {x:p.x,y:p.y} : {x:p.x*imgW,y:p.y*imgH}) }));
+    glass=(d.glass||[]).map(g=>{ const o={id:nextId++,loc:g.loc||'',w:g.w,h:g.h,qty:g.qty||1};
+      if(g.x!=null&&g.y!=null){ if(noImg){o.x=g.x;o.y=g.y;} else {o.x=g.x*imgW;o.y=g.y*imgH;} } return o; });
+    selected=null; updateScaleInfo(); renderList(); updateTotals(); renderGlass(); draw(); if(done)done();
+  };
+  if(d.imgDataURL){ imgDataURL=d.imgDataURL; const im=new Image(); im.onload=()=>{ img=im; imgW=im.naturalWidth; imgH=im.naturalHeight; fitView(); finish(); }; im.src=d.imgDataURL; }
+  else { img=null; imgDataURL=null; imgW=0; imgH=0; finish(); }
+}
+
+// ---- 自動保存 / 復元（ブラウザに記憶。次回開くとそのまま戻る）----
+const LS_KEY='mitsumori_floor_session_v1';
+let saveTimer=null;
+function save(){
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>{
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(buildData())); document.getElementById('savedTag').textContent='自動保存済み'; }
+    catch(err){ document.getElementById('savedTag').textContent='保存不可(画像が大きすぎる可能性)'; }
+  },400);
+}
+function restore(){
+  let raw; try{ raw=localStorage.getItem(LS_KEY); }catch(e){ return; }
+  if(!raw) return;
+  let d; try{ d=JSON.parse(raw); }catch(e){ return; }
+  if(!d.rooms && !d.imgDataURL) return;
+  applyData(d, ()=>status('前回の続きを復元しました（'+rooms.length+'室）'));
+}
+function clearAll(){
+  if(!confirm('現在の作業を消して新規作成しますか？（ブラウザの保存内容も消えます）')) return;
+  try{ localStorage.removeItem(LS_KEY); }catch(e){}
+  img=null; imgDataURL=null; imgW=0; imgH=0; rooms=[]; glass=[]; selected=null; calib=null; pxPerMeter=null; nextId=1;
+  view={scale:1,ox:40,oy:40};
+  updateScaleInfo(); renderList(); updateTotals(); renderGlass(); draw(); status('新規作成。図面画像を開く or「部屋を作る(実測)」で始める');
+}
+document.getElementById('clearBtn').onclick=clearAll;
+
+// ---- file load ----
+let imgDataURL=null;
+function setImageFromURL(url, fit=true){
+  const im=new Image(); im.onload=()=>{ img=im; imgW=im.naturalWidth; imgH=im.naturalHeight; if(fit)fitView(); status('画像読込: '+imgW+'×'+imgH); draw(); save(); }; im.src=url;
+}
+document.getElementById('imgFile').onchange=e=>{
+  const f=e.target.files[0]; if(!f)return; const rd=new FileReader();
+  rd.onload=()=>{ imgDataURL=rd.result; setImageFromURL(imgDataURL); }; rd.readAsDataURL(f);
+};
+document.getElementById('draftFile').onchange=e=>{
+  const f=e.target.files[0]; if(!f)return; const rd=new FileReader();
+  rd.onload=()=>{ try{ loadDraft(JSON.parse(rd.result)); }catch(err){ alert('JSON読込エラー: '+err.message); } }; rd.readAsText(f);
+};
+// draft uses NORMALIZED coords (0..1) so Claude can place without exact pixel size
+function loadDraft(d){
+  if(!img){ alert('先に図面画像を開いてください（下書きの座標は画像サイズ基準のため）'); return; }
+  rooms=[]; selected=null; nextId=1;
+  if(d.scale){
+    if(d.scale.pxPerMeter){ pxPerMeter=d.scale.pxPerMeter; }
+    else if(d.scale.p1&&d.scale.p2&&d.scale.meters){
+      const p1={x:d.scale.p1.x*imgW,y:d.scale.p1.y*imgH}, p2={x:d.scale.p2.x*imgW,y:d.scale.p2.y*imgH};
+      calib={p1,p2,meters:d.scale.meters}; pxPerMeter=Math.hypot(p2.x-p1.x,p2.y-p1.y)/d.scale.meters;
+    }
+  }
+  (d.rooms||[]).forEach(r=>{ rooms.push({ id:nextId++, name:r.name||'部屋', target:r.target!==false, areaOverride:r.areaOverride??'', wMan:r.wMan??'', hMan:r.hMan??'', points:(r.points||[]).map(p=>({x:p.x*imgW,y:p.y*imgH})) }); });
+  updateScaleInfo(); refresh(); status('下書き読込: '+rooms.length+'室');
+}
+// プロジェクト保存：画像も含めた1ファイル（画像なしの実測マップも保存可）。iCloud/ドライブ経由で別端末でも開ける。
+document.getElementById('saveProj').onclick=()=>{
+  if(!img && rooms.length===0){ alert('保存する内容がありません'); return; }
+  const name=(rooms.length?'床面積プロジェクト':'project')+'.floor.json';
+  download(name, JSON.stringify(buildData()), 'application/json');
+};
+// プロジェクトを開く：1ファイルを読み込んで丸ごと復元
+document.getElementById('projFile').onchange=e=>{
+  const f=e.target.files[0]; if(!f)return; const rd=new FileReader();
+  rd.onload=()=>{ try{ applyData(JSON.parse(rd.result), ()=>{ save(); status('プロジェクトを開きました（'+rooms.length+'室）'); }); }
+    catch(err){ alert('読込エラー: '+err.message); } };
+  rd.readAsText(f);
+};
+
+// ---- export ----
+document.getElementById('exportCsv').onclick=()=>{
+  let csv='部屋名,対象,横m,縦m,面積m2,数値の出所\n';
+  rooms.forEach(r=>{ const a=roomAreaM2(r); const dm=roomDimsM(r);
+    csv+=`"${(r.name||'').replace(/"/g,'""')}",${r.target?'対象':'対象外'},${dm.w!=null?dm.w.toFixed(2):''},${dm.h!=null?dm.h.toFixed(2):''},${a!=null?a.toFixed(2):''},${isMeasured(r)?'実測':'自動計算'}\n`; });
+  let tgt=0; rooms.forEach(r=>{const a=roomAreaM2(r); if(r.target&&a!=null)tgt+=a;});
+  csv+=`\n清掃対象合計,,${tgt.toFixed(2)},\n`;
+  download('floor_area.csv','﻿'+csv,'text/csv');
+};
+document.getElementById('exportPng').onclick=()=>{
+  if(rooms.length===0 && !img){ alert('出力する内容がありません'); return; }
+  // 画像あり=画像解像度で描画。画像なし=部屋全体の範囲にフィット。
+  let oc=document.createElement('canvas'), o, tx=0, ty=0;
+  if(img){ oc.width=imgW; oc.height=imgH; o=oc.getContext('2d'); o.fillStyle='#fff'; o.fillRect(0,0,oc.width,oc.height); o.globalAlpha=0.35; o.drawImage(img,0,0); o.globalAlpha=1; }
+  else {
+    const M=60; let mnx=1e9,mny=1e9,mxx=-1e9,mxy=-1e9;
+    rooms.forEach(r=>r.points.forEach(p=>{mnx=Math.min(mnx,p.x);mny=Math.min(mny,p.y);mxx=Math.max(mxx,p.x);mxy=Math.max(mxy,p.y);}));
+    oc.width=Math.max(200,(mxx-mnx))+M*2; oc.height=Math.max(200,(mxy-mny))+M*2; o=oc.getContext('2d');
+    o.fillStyle='#fff'; o.fillRect(0,0,oc.width,oc.height); tx=M-mnx; ty=M-mny; o.translate(tx,ty);
+  }
+  rooms.forEach(r=>{ if(r.points.length<3)return; o.beginPath(); r.points.forEach((p,i)=>i?o.lineTo(p.x,p.y):o.moveTo(p.x,p.y)); o.closePath();
+    o.fillStyle=r.target?'rgba(66,133,244,0.30)':'rgba(150,150,150,0.30)'; o.fill(); o.lineWidth=3; o.strokeStyle=r.target?'#4285f4':'#999'; o.stroke();
+    const c=centroid(r.points); const a=roomAreaM2(r); const dm=roomDimsM(r); const meas=isMeasured(r);
+    const MC='#1a8a4a', AC='#444';
+    o.textAlign='center';
+    o.fillStyle='#222'; o.font='bold 20px sans-serif'; o.fillText(r.name||'',c.x,c.y-16);
+    if(dm.w!=null&&dm.h!=null){ o.font='15px sans-serif'; o.fillStyle=(dm.wMeasured||dm.hMeasured)?MC:AC; o.fillText(`${dm.w.toFixed(2)} × ${dm.h.toFixed(2)} m`,c.x,c.y+6); }
+    if(a!=null){ o.font='bold 18px sans-serif'; o.fillStyle=meas?MC:AC; o.fillText(a.toFixed(1)+' m²'+(meas?' ◆':''),c.x,c.y+28); } });
+  // ガラスマーカー
+  glass.forEach(g=>{ if(g.x==null||g.y==null)return; const area=g.w*g.h; const bcol=area<1?'#7e57c2':area<2?'#4285f4':'#e67e22';
+    const label='窓×'+g.qty; o.font='bold 15px sans-serif'; const tw=o.measureText(label).width; const pw=tw+16,ph=24;
+    o.fillStyle=bcol; o.strokeStyle='#fff'; o.lineWidth=2;
+    if(o.roundRect){o.beginPath();o.roundRect(g.x-pw/2,g.y-ph/2,pw,ph,6);o.fill();o.stroke();}else{o.fillRect(g.x-pw/2,g.y-ph/2,pw,ph);}
+    o.fillStyle='#fff'; o.textAlign='center'; o.textBaseline='middle'; o.fillText(label,g.x,g.y); o.textBaseline='alphabetic'; });
+  oc.toBlob(b=>{ const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download='floor_map.png'; a.click(); });
+};
+function download(name,text,type){ const b=new Blob([text],{type}); const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download=name; a.click(); }
+
+// ---- ガラス枚数 ----
+function glassBand(area){ // 窓ガラス料金区分
+  if(area<1) return {key:'b1', label:'1m²未満'};
+  if(area<2) return {key:'b2', label:'1〜2m²未満'};
+  return {key:'b3', label:'2m²以上'};
+}
+function addGlass(loc,w,h,qty){
+  if(!(w>0&&h>0)){ alert('横と縦をメートルで入力してください'); return; }
+  qty=parseInt(qty)||1; if(qty<1)qty=1;
+  glass.push({id:nextId++, loc:loc||'', w, h, qty});
+  renderGlass(); save();
+}
+function deleteGlass(g){ glass=glass.filter(x=>x!==g); renderGlass(); save(); }
+function renderGlass(){
+  const el=document.getElementById('glassList'); el.innerHTML='';
+  glass.forEach(g=>{
+    const area=g.w*g.h; const b=glassBand(area);
+    const placed = g.x!=null && g.y!=null;
+    const room = placed ? roomAt({x:g.x,y:g.y}) : null;
+    const where = placed ? (room?`📍${(room.name||'部屋')}`:'📍配置済(部屋外)') : '未配置';
+    const d=document.createElement('div'); d.className='glass-item';
+    d.innerHTML=`<div class="row"><b>${(g.loc||'(場所未記入)').replace(/</g,'&lt;')}</b>
+      <span class="band ${b.key}" style="margin-left:6px;">${b.label}</span>
+      <span class="danger" data-f="del" style="float:right;">削除</span></div>
+      <div class="row" style="margin-top:4px;">横<input type="number" step="0.1" value="${g.w}" data-f="w" style="width:56px;">
+      ×縦<input type="number" step="0.1" value="${g.h}" data-f="h" style="width:56px;">
+      ×<input type="number" step="1" min="1" value="${g.qty}" data-f="q" style="width:46px;">枚
+      = <b>${(area).toFixed(2)} m²/枚</b></div>
+      <div class="row" style="margin-top:4px;"><span style="color:${room?'#1a8a4a':'#888'};">${where}</span>
+      <button data-f="place" style="margin-left:auto;font-size:11px;padding:2px 8px;">${placed?'位置を変更':'マップに配置'}</button>
+      ${placed?'<button data-f="unplace" style="font-size:11px;padding:2px 8px;">外す</button>':''}</div>`;
+    d.querySelector('[data-f=w]').oninput=e=>{g.w=parseFloat(e.target.value)||0;renderGlass();save();};
+    d.querySelector('[data-f=h]').oninput=e=>{g.h=parseFloat(e.target.value)||0;renderGlass();save();};
+    d.querySelector('[data-f=q]').oninput=e=>{g.qty=parseInt(e.target.value)||1;renderGlass();save();};
+    d.querySelector('[data-f=del]').onclick=()=>deleteGlass(g);
+    d.querySelector('[data-f=place]').onclick=()=>{ placingGlass=g; setTab('floor'); status('マップ上をクリック/タップして「'+(g.loc||'ガラス')+'」を配置'); };
+    const un=d.querySelector('[data-f=unplace]'); if(un) un.onclick=()=>{ g.x=null; g.y=null; renderGlass(); refresh(); };
+    el.appendChild(d);
+  });
+  // 集計
+  const bands={b1:{n:0,a:0,label:'1m²未満'}, b2:{n:0,a:0,label:'1〜2m²未満'}, b3:{n:0,a:0,label:'2m²以上'}};
+  let totN=0, totA=0;
+  glass.forEach(g=>{ const area=g.w*g.h; const b=glassBand(area); bands[b.key].n+=g.qty; bands[b.key].a+=area*g.qty; totN+=g.qty; totA+=area*g.qty; });
+  const sum=document.getElementById('glassSummary');
+  if(totN===0){ sum.innerHTML='まだ登録がありません'; }
+  else {
+    let rows='';
+    ['b1','b2','b3'].forEach(k=>{ if(bands[k].n>0) rows+=`<tr><td><span class="band ${k}">${bands[k].label}</span></td><td style="text-align:right;padding-left:10px;"><b>${bands[k].n}</b> 枚</td><td style="text-align:right;padding-left:10px;color:#555;">${bands[k].a.toFixed(2)} m²</td></tr>`; });
+    sum.innerHTML=`<div style="font-weight:bold;margin-bottom:4px;">合計 ${totN} 枚 ／ ${totA.toFixed(2)} m²</div>
+      <table style="font-size:13px;border-collapse:collapse;">${rows}</table>
+      <div class="hint" style="margin-top:4px;">面積帯ごとの枚数＝ガラス清掃の見積もり区分</div>`;
+  }
+}
+document.getElementById('gAdd').onclick=()=>{
+  const loc=document.getElementById('gLoc').value.trim();
+  const w=parseFloat(document.getElementById('gW').value), h=parseFloat(document.getElementById('gH').value), q=document.getElementById('gQ').value;
+  addGlass(loc,w,h,q);
+  document.getElementById('gLoc').value=''; document.getElementById('gW').value=''; document.getElementById('gH').value=''; document.getElementById('gQ').value='';
+  document.getElementById('gLoc').focus();
+};
+document.getElementById('gQ').addEventListener('keydown',e=>{ if(e.key==='Enter') document.getElementById('gAdd').click(); });
+document.getElementById('glassCsv').onclick=()=>{
+  if(glass.length===0){ alert('ガラスが登録されていません'); return; }
+  let csv='場所,部屋,横m,縦m,1枚面積m2,枚数,面積帯\n';
+  glass.forEach(g=>{ const area=g.w*g.h; const room=(g.x!=null)?(roomAt({x:g.x,y:g.y})?.name||''):''; csv+=`"${(g.loc||'').replace(/"/g,'""')}","${room.replace(/"/g,'""')}",${g.w},${g.h},${area.toFixed(2)},${g.qty},${glassBand(area).label}\n`; });
+  const bands={'1m²未満':[0,0],'1〜2m²未満':[0,0],'2m²以上':[0,0]};
+  glass.forEach(g=>{ const area=g.w*g.h; const l=glassBand(area).label; bands[l][0]+=g.qty; bands[l][1]+=area*g.qty; });
+  csv+='\n面積帯,枚数,合計面積m2\n';
+  Object.keys(bands).forEach(l=>{ if(bands[l][0]>0) csv+=`${l},${bands[l][0]},${bands[l][1].toFixed(2)}\n`; });
+  download('glass_list.csv','﻿'+csv,'text/csv');
+};
+
+// ---- タブ切替 ----
+function setTab(t){
+  const f=t==='floor';
+  document.getElementById('tabFloor').classList.toggle('active',f);
+  document.getElementById('tabGlass').classList.toggle('active',!f);
+  document.getElementById('floorView').hidden=!f;
+  document.getElementById('glassView').hidden=f;
+  // ガラスタブ中はマップ用ボタンを隠す
+  ['modeSelect','modeAdd','modeScale','exportPng','exportCsv'].forEach(id=>{ document.getElementById(id).style.display=f?'':'none'; });
+  if(!f) renderGlass();
+}
+document.getElementById('tabFloor').onclick=()=>setTab('floor');
+document.getElementById('tabGlass').onclick=()=>setTab('glass');
+
+resize();
+restore();
+</script>
+</body>
+</html>
