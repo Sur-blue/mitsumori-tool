@@ -56,27 +56,44 @@
   .glass-item input { font-size:12px; padding:2px 4px; }
   .totals { background:var(--bluebg); border-radius:6px; padding:10px; font-size:14px; line-height:1.6; }
   .hint { font-size:12px; color:#666; line-height:1.5; }
-  #status { font-size:12px; color:#888; margin-left:auto; }
+  #status { font-size:12px; color:#888; margin-left:auto; max-width:38%; }
+  .menu { position:relative; display:inline-block; }
+  .menupop { position:absolute; top:calc(100% + 4px); left:0; z-index:50; background:#fff; border:1px solid #ccc;
+    border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,.18); padding:6px; min-width:220px; display:flex; flex-direction:column; gap:2px; }
+  .mitem { display:block; width:100%; text-align:left; font-size:14px; padding:10px 12px; border:none; background:none;
+    border-radius:6px; cursor:pointer; color:#222; }
+  .mitem:hover, .mitem:active { background:var(--bluebg); }
+  .mitem.adv { font-size:12px; color:#888; }
+  .mdiv { height:1px; background:#eee; margin:4px 0; }
   .danger { color:#c0392b; cursor:pointer; }
   .scaleInfo { font-size:12px; color:#444; }
 </style>
 </head>
 <body>
 <div id="top">
-  <label class="btn">画像を開く<input id="imgFile" type="file" accept="image/*" hidden></label>
-  <label class="btn">下書きJSON<input id="draftFile" type="file" accept=".json,application/json" hidden></label>
-  <span class="sep"></span>
-  <button id="modeSelect" class="active">選択/移動</button>
-  <button id="modeAdd">部屋を追加</button>
-  <button id="modeScale">縮尺合わせ</button>
-  <span class="sep"></span>
-  <button id="exportPng">PNG出力</button>
-  <button id="exportCsv">表(CSV)</button>
-  <label class="btn">プロジェクトを開く<input id="projFile" type="file" accept=".json,application/json" hidden></label>
-  <button id="saveProj">プロジェクト保存(画像ごと)</button>
-  <button id="clearBtn">新規/クリア</button>
+  <div class="menu">
+    <button class="btn menubtn" id="fileMenuBtn">☰ ファイル ▾</button>
+    <div class="menupop" id="fileMenu" hidden>
+      <label class="mitem">🖼 図面写真を開く<input id="imgFile" type="file" accept="image/*" hidden></label>
+      <label class="mitem">📂 保存データを開く<input id="projFile" type="file" accept=".json,application/json" hidden></label>
+      <button class="mitem" id="saveProj">💾 保存（画像ごと1ファイル）</button>
+      <button class="mitem" id="clearBtn">✨ 新規作成</button>
+      <div class="mdiv"></div>
+      <label class="mitem adv">⚙︎ Claudeの下書きを読込（上級）<input id="draftFile" type="file" accept=".json,application/json" hidden></label>
+    </div>
+  </div>
+  <button id="modeSelect" class="active">✋ 選ぶ・動かす</button>
+  <button id="modeAdd">✏️ 部屋を描く</button>
+  <button id="modeScale">📏 縮尺合わせ</button>
+  <div class="menu">
+    <button class="btn menubtn" id="exMenuBtn">⬇︎ 書き出し ▾</button>
+    <div class="menupop" id="exMenu" hidden>
+      <button class="mitem" id="exportPng">🖼 PNG画像で保存</button>
+      <button class="mitem" id="exportCsv">📊 面積一覧(CSV)で保存</button>
+    </div>
+  </div>
   <span id="savedTag" style="font-size:12px;color:#1a8a4a;margin-left:6px;"></span>
-  <span id="status">画像を開いてください</span>
+  <span id="status">「ファイル」から図面を開く、または「部屋を描く」で開始</span>
 </div>
 <div id="main">
   <div id="canvasWrap">
@@ -667,12 +684,23 @@ function setTab(t){
   document.getElementById('floorView').hidden=!f;
   document.getElementById('glassView').hidden=f;
   // ガラスタブ中はマップ用ボタンを隠す
-  ['modeSelect','modeAdd','modeScale','exportPng','exportCsv'].forEach(id=>{ document.getElementById(id).style.display=f?'':'none'; });
+  ['modeSelect','modeAdd','modeScale','exMenuBtn'].forEach(id=>{ document.getElementById(id).style.display=f?'':'none'; });
   document.getElementById('delRoomBtn').hidden = !(f && selected);
   if(!f) renderGlass();
 }
 document.getElementById('tabFloor').onclick=()=>setTab('floor');
 document.getElementById('tabGlass').onclick=()=>setTab('glass');
+
+// ---- ドロップダウンメニュー ----
+function closeMenus(except){ document.querySelectorAll('.menupop').forEach(p=>{ if(p!==except) p.hidden=true; }); }
+function toggleMenu(btnId, popId){
+  document.getElementById(btnId).onclick=e=>{ e.stopPropagation(); const p=document.getElementById(popId); const willOpen=p.hidden; closeMenus(); p.hidden=!willOpen; };
+  // メニュー内の項目を押したら閉じる
+  document.getElementById(popId).addEventListener('click',()=>{ setTimeout(()=>{ document.getElementById(popId).hidden=true; },0); });
+}
+toggleMenu('fileMenuBtn','fileMenu');
+toggleMenu('exMenuBtn','exMenu');
+document.addEventListener('click',()=>closeMenus());
 
 resize();
 restore();
