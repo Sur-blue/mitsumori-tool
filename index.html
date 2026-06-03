@@ -7,23 +7,28 @@
 <style>
   :root { --blue:#4285f4; --bluebg:#e8f0fe; --gray:#bbb; --graybg:#f0f0f0; }
   * { box-sizing: border-box; }
-  body { margin:0; font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif; color:#222; }
-  #top { display:flex; gap:8px; align-items:center; padding:8px 12px; background:#fafafa; border-bottom:1px solid #ddd; flex-wrap:wrap; }
+  html, body { height:100%; }
+  body { margin:0; font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif; color:#222;
+    height:100vh; height:100dvh; display:flex; flex-direction:column; }
+  #top { flex:0 0 auto; display:flex; gap:8px; align-items:center; padding:8px 12px; background:#fafafa; border-bottom:1px solid #ddd; flex-wrap:wrap; }
   #top button, #top label.btn { font-size:13px; padding:6px 10px; border:1px solid #ccc; background:#fff; border-radius:6px; cursor:pointer; }
   #top button.active { background:var(--blue); color:#fff; border-color:var(--blue); }
   #top button:hover { background:#f0f0f0; }
   #top button.active:hover { background:#3b78e7; }
   .sep { width:1px; height:24px; background:#ddd; margin:0 4px; }
-  #main { display:flex; height:calc(100vh - 49px); }
-  #canvasWrap { flex:1; position:relative; overflow:hidden; background:#e9e9e9; }
+  #main { flex:1 1 auto; min-height:0; display:flex; }
+  #canvasWrap { flex:1 1 auto; min-width:0; min-height:0; position:relative; overflow:hidden; background:#e9e9e9; }
   canvas { position:absolute; top:0; left:0; touch-action:none; }
+  #delRoomBtn { position:absolute; right:12px; bottom:12px; z-index:5; padding:10px 14px; font-size:14px;
+    background:#c0392b; color:#fff; border:none; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,.3); cursor:pointer; }
+  #delRoomBtn:active { background:#a93226; }
   @media (max-width:760px){
-    #main { flex-direction:column; height:calc(100vh - 49px); }
-    #canvasWrap { flex:none; height:52vh; }
-    #side { width:100%; flex:1; border-left:none; border-top:1px solid #ddd; }
+    #main { flex-direction:column; }
+    #canvasWrap { flex:0 0 50dvh; }
+    #side { width:100%; flex:1 1 auto; min-height:0; border-left:none; border-top:1px solid #ddd; }
     #top button, #top label.btn { padding:8px 10px; }
   }
-  #side { width:300px; border-left:1px solid #ddd; overflow-y:auto; padding:10px; background:#fff; }
+  #side { width:300px; min-height:0; border-left:1px solid #ddd; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:10px; padding-bottom:80px; background:#fff; }
   #side h3 { font-size:14px; margin:8px 0 4px; }
   .room-item { border:1px solid #e0e0e0; border-radius:6px; padding:8px; margin-bottom:8px; }
   .room-item.selected { border-color:var(--blue); box-shadow:0 0 0 2px var(--bluebg); }
@@ -76,6 +81,7 @@
 <div id="main">
   <div id="canvasWrap">
     <canvas id="cv"></canvas>
+    <button id="delRoomBtn" hidden>🗑 この部屋を削除</button>
   </div>
   <div id="side">
     <div id="tabs">
@@ -402,8 +408,9 @@ document.getElementById('modeAdd').onclick=()=>setMode('add');
 document.getElementById('modeScale').onclick=()=>setMode('scale');
 
 // ---- side panel ----
-function selectRoom(r){ selected=r; renderList(); draw(); }
-function deleteRoom(r){ rooms=rooms.filter(x=>x!==r); if(selected===r)selected=null; refresh(); }
+function selectRoom(r){ selected=r; document.getElementById('delRoomBtn').hidden=!r; renderList(); draw(); }
+function deleteRoom(r){ rooms=rooms.filter(x=>x!==r); if(selected===r)selected=null; document.getElementById('delRoomBtn').hidden=!selected; refresh(); }
+document.getElementById('delRoomBtn').onclick=()=>{ if(selected && confirm('「'+(selected.name||'この部屋')+'」を削除しますか？')) deleteRoom(selected); };
 function renderList(){
   const el=document.getElementById('roomList'); el.innerHTML='';
   rooms.forEach(r=>{
@@ -661,6 +668,7 @@ function setTab(t){
   document.getElementById('glassView').hidden=f;
   // ガラスタブ中はマップ用ボタンを隠す
   ['modeSelect','modeAdd','modeScale','exportPng','exportCsv'].forEach(id=>{ document.getElementById(id).style.display=f?'':'none'; });
+  document.getElementById('delRoomBtn').hidden = !(f && selected);
   if(!f) renderGlass();
 }
 document.getElementById('tabFloor').onclick=()=>setTab('floor');
