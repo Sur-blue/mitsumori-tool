@@ -60,6 +60,7 @@
   .menu { position:relative; display:inline-block; }
   .menupop { position:absolute; top:calc(100% + 4px); left:0; z-index:50; background:#fff; border:1px solid #ccc;
     border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,.18); padding:6px; min-width:220px; display:flex; flex-direction:column; gap:2px; }
+  .menupop[hidden] { display:none; }
   .mitem { display:block; width:100%; text-align:left; font-size:14px; padding:10px 12px; border:none; background:none;
     border-radius:6px; cursor:pointer; color:#222; }
   .mitem:hover, .mitem:active { background:var(--bluebg); }
