@@ -55,6 +55,11 @@
   .band.b1 { background:#7e57c2; } .band.b2 { background:#4285f4; } .band.b3 { background:#e67e22; }
   .glass-item input { font-size:12px; padding:2px 4px; }
   .totals { background:var(--bluebg); border-radius:6px; padding:10px; font-size:14px; line-height:1.6; }
+  .estimate { background:#fff7e6; border:1px solid #f0c987; border-radius:6px; padding:10px; font-size:14px; margin-bottom:8px; }
+  #priceBox { border:1px solid #e0e0e0; border-radius:6px; padding:6px 10px; margin-bottom:8px; background:#fbfbfb; }
+  #priceBox summary { cursor:pointer; font-size:13px; font-weight:bold; padding:2px 0; }
+  .priceRow { display:flex; align-items:center; gap:6px; font-size:13px; margin:6px 0; }
+  .priceRow input { width:80px; padding:4px; font-size:13px; margin-left:auto; }
   .hint { font-size:12px; color:#666; line-height:1.5; }
   #status { font-size:12px; color:#888; margin-left:auto; max-width:38%; }
   .menu { position:relative; display:inline-block; }
@@ -106,6 +111,17 @@
       <button id="tabFloor" class="tab active">床面積マップ</button>
       <button id="tabGlass" class="tab">ガラス枚数</button>
     </div>
+
+    <div class="estimate" id="estimate"><b>見積り（税込）</b><br><span class="hint">床の単価を入れる／ガラスを登録すると金額が出ます</span></div>
+    <details id="priceBox">
+      <summary>💴 料金設定（税込・Bエリア）</summary>
+      <div class="priceRow">床 単価<input id="pFloor" type="number" step="10" placeholder="円/m²"> 円/m²</div>
+      <div class="priceRow">ガラス 1m²未満<input id="pG1" type="number" step="10"> 円/枚</div>
+      <div class="priceRow">ガラス 1〜2m²未満<input id="pG2" type="number" step="10"> 円/枚</div>
+      <div class="priceRow">ガラス 2m²以上<input id="pG3" type="number" step="10"> 円/2m²</div>
+      <div class="hint">初期値は窓ガラス（madoglass）のBエリア税込。単価は変更できます。2m²以上は「面積÷2×この単価」。</div>
+    </details>
+
     <div id="floorView">
     <div class="scaleInfo" id="scaleInfo">縮尺: 未設定</div>
     <div class="totals" id="totals">対象合計: — m²</div>
@@ -172,6 +188,10 @@ let hoverV = null;
 let nextId = 1;
 let glass = []; // {id, loc, w, h, qty, x?, y?}  x,y=マップ上の配置（world px、未配置なら無し）
 let placingGlass = null; // 配置待ちのガラス
+// 料金設定（税込・Bエリア）。床は円/m²、ガラスは区分単価。gB3は「2m²あたり」単価。
+let prices = { floorPerM2:'', gB1:1980, gB2:2640, gB3:2640 };
+const MIN_CHARGE = 11000;
+function yen(n){ return '¥'+Math.round(n).toLocaleString('ja-JP'); }
 
 function resize(){ cv.width = wrap.clientWidth; cv.height = wrap.clientHeight; draw(); }
 window.addEventListener('resize', resize);
@@ -455,13 +475,43 @@ function renderList(){
     el.appendChild(d);
   });
 }
-function updateTotals(){
+// 面積集計（対象室合計・全体・未計算ありか）を1か所で
+function areaTotals(){
   let tgt=0,all=0,ok=true;
   rooms.forEach(r=>{ const a=roomAreaM2(r); if(a==null){ok=false;return;} all+=a; if(r.target)tgt+=a; });
-  const n=rooms.filter(r=>r.target).length;
+  return { tgt, all, ok, n:rooms.filter(r=>r.target).length };
+}
+function updateTotals(){
+  const t=areaTotals();
   document.getElementById('totals').innerHTML = pxPerMeter||rooms.some(r=>r.areaOverride)
-    ? `清掃対象合計: <b>${tgt.toFixed(1)} m²</b>（${n}室）<br><span class="hint">参考・全体: ${all.toFixed(1)} m²</span>`+(ok?'':'<br><span class="hint">※未計算の部屋あり（縮尺未設定）</span>')
+    ? `清掃対象合計: <b>${t.tgt.toFixed(1)} m²</b>（${t.n}室）<br><span class="hint">参考・全体: ${t.all.toFixed(1)} m²</span>`+(t.ok?'':'<br><span class="hint">※未計算の部屋あり（縮尺未設定）</span>')
     : '対象合計: — m²（縮尺を設定してください）';
+  updateEstimate();
+}
+
+// ---- 金額算出（税込・Bエリア）----
+function floorPrice(){ const u=parseFloat(prices.floorPerM2); if(!(u>0)) return null; return areaTotals().tgt*u; }
+function glassPrice(){
+  if(glass.length===0) return null;
+  const b1=parseFloat(prices.gB1)||0, b2=parseFloat(prices.gB2)||0, b3=parseFloat(prices.gB3)||0;
+  let sum=0;
+  glass.forEach(g=>{ const area=g.w*g.h; let per; if(area<1)per=b1; else if(area<2)per=b2; else per=(area/2)*b3; sum+=per*g.qty; });
+  return sum;
+}
+function updateEstimate(){
+  const fp=floorPrice(), gp=glassPrice();
+  const box=document.getElementById('estimate'); if(!box) return;
+  if(fp==null && gp==null){ box.innerHTML='<b>見積り（税込）</b><br><span class="hint">床の単価を入れる／ガラスを登録すると金額が出ます</span>'; return; }
+  const total=(fp||0)+(gp||0);
+  const below=total<MIN_CHARGE;
+  let html='<b>見積り（税込・Bエリア概算）</b>';
+  html+=`<table style="font-size:13px;border-collapse:collapse;margin-top:4px;">`;
+  html+=`<tr><td>床</td><td style="text-align:right;padding-left:12px;">${fp!=null?yen(fp):'—'}</td></tr>`;
+  html+=`<tr><td>ガラス</td><td style="text-align:right;padding-left:12px;">${gp!=null?yen(gp):'—'}</td></tr>`;
+  html+=`<tr><td style="border-top:1px solid #cbd5e8;"><b>合計</b></td><td style="text-align:right;padding-left:12px;border-top:1px solid #cbd5e8;"><b>${yen(total)}</b></td></tr>`;
+  html+=`</table>`;
+  if(below) html+=`<div class="hint" style="color:#c0392b;margin-top:3px;">最低料金 11,000円（税込）が適用されます → <b>${yen(MIN_CHARGE)}</b></div>`;
+  box.innerHTML=html;
 }
 function updateScaleInfo(){
   const el=document.getElementById('scaleInfo');
@@ -482,7 +532,8 @@ function buildData(){
       points:r.points.map(p=> noImg ? {x:Math.round(p.x),y:Math.round(p.y)} : {x:+(p.x/imgW).toFixed(4),y:+(p.y/imgH).toFixed(4)}) })),
     glass: glass.map(g=>{ const o={loc:g.loc,w:g.w,h:g.h,qty:g.qty};
       if(g.x!=null&&g.y!=null){ if(noImg){o.x=Math.round(g.x);o.y=Math.round(g.y);} else {o.x=+(g.x/imgW).toFixed(4);o.y=+(g.y/imgH).toFixed(4);} }
-      return o; }) };
+      return o; }),
+    prices: {...prices} };
 }
 function applyData(d, done){
   const finish=()=>{
@@ -494,6 +545,7 @@ function applyData(d, done){
       points:(r.points||[]).map(p=> noImg ? {x:p.x,y:p.y} : {x:p.x*imgW,y:p.y*imgH}) }));
     glass=(d.glass||[]).map(g=>{ const o={id:nextId++,loc:g.loc||'',w:g.w,h:g.h,qty:g.qty||1};
       if(g.x!=null&&g.y!=null){ if(noImg){o.x=g.x;o.y=g.y;} else {o.x=g.x*imgW;o.y=g.y*imgH;} } return o; });
+    if(d.prices){ prices={ floorPerM2:'', gB1:1980, gB2:2640, gB3:2640, ...d.prices }; if(typeof syncPriceInputs==='function')syncPriceInputs(); }
     selected=null; updateScaleInfo(); renderList(); updateTotals(); renderGlass(); draw(); if(done)done();
   };
   if(d.imgDataURL){ imgDataURL=d.imgDataURL; const im=new Image(); im.onload=()=>{ img=im; imgW=im.naturalWidth; imgH=im.naturalHeight; fitView(); finish(); }; im.src=d.imgDataURL; }
@@ -521,6 +573,7 @@ function clearAll(){
   if(!confirm('現在の作業を消して新規作成しますか？（ブラウザの保存内容も消えます）')) return;
   try{ localStorage.removeItem(LS_KEY); }catch(e){}
   img=null; imgDataURL=null; imgW=0; imgH=0; rooms=[]; glass=[]; selected=null; calib=null; pxPerMeter=null; nextId=1;
+  prices={ floorPerM2:'', gB1:1980, gB2:2640, gB3:2640 }; if(typeof syncPriceInputs==='function')syncPriceInputs();
   view={scale:1,ox:40,oy:40};
   updateScaleInfo(); renderList(); updateTotals(); renderGlass(); draw(); status('新規作成。図面画像を開く or「部屋を作る(実測)」で始める');
 }
@@ -573,7 +626,13 @@ document.getElementById('exportCsv').onclick=()=>{
   rooms.forEach(r=>{ const a=roomAreaM2(r); const dm=roomDimsM(r);
     csv+=`"${(r.name||'').replace(/"/g,'""')}",${r.target?'対象':'対象外'},${dm.w!=null?dm.w.toFixed(2):''},${dm.h!=null?dm.h.toFixed(2):''},${a!=null?a.toFixed(2):''},${isMeasured(r)?'実測':'自動計算'}\n`; });
   let tgt=0; rooms.forEach(r=>{const a=roomAreaM2(r); if(r.target&&a!=null)tgt+=a;});
-  csv+=`\n清掃対象合計,,${tgt.toFixed(2)},\n`;
+  csv+=`\n清掃対象合計,,,,${tgt.toFixed(2)},\n`;
+  const fp=floorPrice(), gp=glassPrice();
+  csv+=`\n床単価(円/m²),${prices.floorPerM2||'(未設定)'}\n`;
+  csv+=`床料金(税込),${fp!=null?Math.round(fp):'(単価未設定)'}\n`;
+  if(gp!=null) csv+=`ガラス料金(税込),${Math.round(gp)}\n`;
+  if(fp!=null||gp!=null){ const tot=(fp||0)+(gp||0); csv+=`床＋ガラス合計(税込),${Math.round(tot)}\n`; if(tot<MIN_CHARGE)csv+=`最低料金適用後(税込),${MIN_CHARGE}\n`; }
+  csv+=`\n※金額は税込・Bエリアの概算。確定は別途確認。\n`;
   download('floor_area.csv','﻿'+csv,'text/csv');
 };
 document.getElementById('exportPng').onclick=()=>{
@@ -653,10 +712,12 @@ function renderGlass(){
   else {
     let rows='';
     ['b1','b2','b3'].forEach(k=>{ if(bands[k].n>0) rows+=`<tr><td><span class="band ${k}">${bands[k].label}</span></td><td style="text-align:right;padding-left:10px;"><b>${bands[k].n}</b> 枚</td><td style="text-align:right;padding-left:10px;color:#555;">${bands[k].a.toFixed(2)} m²</td></tr>`; });
-    sum.innerHTML=`<div style="font-weight:bold;margin-bottom:4px;">合計 ${totN} 枚 ／ ${totA.toFixed(2)} m²</div>
+    const gp=glassPrice();
+    sum.innerHTML=`<div style="font-weight:bold;margin-bottom:4px;">合計 ${totN} 枚 ／ ${totA.toFixed(2)} m²${gp!=null?` ／ ガラス料金 <span style="color:#1a8a4a;">${yen(gp)}</span>`:''}</div>
       <table style="font-size:13px;border-collapse:collapse;">${rows}</table>
-      <div class="hint" style="margin-top:4px;">面積帯ごとの枚数＝ガラス清掃の見積もり区分</div>`;
+      <div class="hint" style="margin-top:4px;">面積帯ごとの枚数＝ガラス清掃の見積もり区分（料金は上の「見積り」「料金設定」と連動）</div>`;
   }
+  updateEstimate();
 }
 document.getElementById('gAdd').onclick=()=>{
   const loc=document.getElementById('gLoc').value.trim();
@@ -668,12 +729,19 @@ document.getElementById('gAdd').onclick=()=>{
 document.getElementById('gQ').addEventListener('keydown',e=>{ if(e.key==='Enter') document.getElementById('gAdd').click(); });
 document.getElementById('glassCsv').onclick=()=>{
   if(glass.length===0){ alert('ガラスが登録されていません'); return; }
-  let csv='場所,部屋,横m,縦m,1枚面積m2,枚数,面積帯\n';
-  glass.forEach(g=>{ const area=g.w*g.h; const room=(g.x!=null)?(roomAt({x:g.x,y:g.y})?.name||''):''; csv+=`"${(g.loc||'').replace(/"/g,'""')}","${room.replace(/"/g,'""')}",${g.w},${g.h},${area.toFixed(2)},${g.qty},${glassBand(area).label}\n`; });
+  const unit=area=>{ const b1=parseFloat(prices.gB1)||0,b2=parseFloat(prices.gB2)||0,b3=parseFloat(prices.gB3)||0; return area<1?b1:area<2?b2:(area/2)*b3; };
+  let csv='場所,部屋,横m,縦m,1枚面積m2,枚数,面積帯,単価円/枚,金額円\n';
+  glass.forEach(g=>{ const area=g.w*g.h; const room=(g.x!=null)?(roomAt({x:g.x,y:g.y})?.name||''):''; const u=unit(area);
+    csv+=`"${(g.loc||'').replace(/"/g,'""')}","${room.replace(/"/g,'""')}",${g.w},${g.h},${area.toFixed(2)},${g.qty},${glassBand(area).label},${Math.round(u)},${Math.round(u*g.qty)}\n`; });
   const bands={'1m²未満':[0,0],'1〜2m²未満':[0,0],'2m²以上':[0,0]};
   glass.forEach(g=>{ const area=g.w*g.h; const l=glassBand(area).label; bands[l][0]+=g.qty; bands[l][1]+=area*g.qty; });
   csv+='\n面積帯,枚数,合計面積m2\n';
   Object.keys(bands).forEach(l=>{ if(bands[l][0]>0) csv+=`${l},${bands[l][0]},${bands[l][1].toFixed(2)}\n`; });
+  const gp=glassPrice(), fp=floorPrice();
+  csv+=`\nガラス料金(税込),${gp!=null?Math.round(gp):0}\n`;
+  if(fp!=null) csv+=`床料金(税込),${Math.round(fp)}\n`;
+  { const tot=(fp||0)+(gp||0); csv+=`床＋ガラス合計(税込),${Math.round(tot)}\n`; if(tot<MIN_CHARGE)csv+=`最低料金適用後(税込),${MIN_CHARGE}\n`; }
+  csv+=`\n※金額は税込・Bエリアの概算。確定は別途確認。\n`;
   download('glass_list.csv','﻿'+csv,'text/csv');
 };
 
@@ -702,6 +770,17 @@ function toggleMenu(btnId, popId){
 toggleMenu('fileMenuBtn','fileMenu');
 toggleMenu('exMenuBtn','exMenu');
 document.addEventListener('click',()=>closeMenus());
+
+// ---- 料金設定の入力バインド ----
+function syncPriceInputs(){
+  document.getElementById('pFloor').value=prices.floorPerM2??'';
+  document.getElementById('pG1').value=prices.gB1??'';
+  document.getElementById('pG2').value=prices.gB2??'';
+  document.getElementById('pG3').value=prices.gB3??'';
+}
+function bindPrice(id,key){ document.getElementById(id).addEventListener('input',e=>{ prices[key]=e.target.value; updateEstimate(); renderGlass(); save(); }); }
+bindPrice('pFloor','floorPerM2'); bindPrice('pG1','gB1'); bindPrice('pG2','gB2'); bindPrice('pG3','gB3');
+syncPriceInputs();
 
 resize();
 restore();
